@@ -11,7 +11,10 @@ from opendevin.core.schema import AgentState
 from opendevin.events.action import (
     MessageAction,
 )
-from opendevin.events.action.agent import AgentFinishAction
+from opendevin.events.action.agent import (
+    AgentDelegateSummaryAction,
+    AgentFinishAction,
+)
 from opendevin.memory.history import ShortTermHistory
 from opendevin.storage.files import FileStore
 
@@ -90,7 +93,6 @@ class State:
     # max number of iterations for the current task
     max_iterations: int = 100
     confirmation_mode: bool = False
-    history: ShortTermHistory = field(default_factory=ShortTermHistory)
     inputs: dict = field(default_factory=dict)
     outputs: dict = field(default_factory=dict)
     last_error: str | None = None
@@ -110,6 +112,9 @@ class State:
     # NOTE: This will never be used by the controller, but it can be used by different
     # evaluation tasks to store extra data needed to track the progress/state of the task.
     extra_data: dict[str, Any] = field(default_factory=dict)
+    delegate_summaries: dict[tuple[int, int], AgentDelegateSummaryAction] = field(
+        default_factory=dict
+    )
 
     def save_to_session(self, sid: str, file_store: FileStore):
         pickled = pickle.dumps(self)
@@ -150,6 +155,7 @@ class State:
         # save the relevant data from recent history
         # so that we can restore it when the state is restored
         if 'history' in state:
+            state['delegate_summaries'] = state['history'].delegate_summaries
             state['start_id'] = state['history'].start_id
             state['end_id'] = state['history'].end_id
 
@@ -164,11 +170,14 @@ class State:
         if not hasattr(self, 'history'):
             self.history = ShortTermHistory()
 
-        # restore the relevant data in history from the state
+            # restore the relevant data in history from the state
+            if hasattr(self, 'delegate_summaries'):
+                self.history.delegate_summaries = self.delegate_summaries
         self.history.start_id = self.start_id
         self.history.end_id = self.end_id
 
         # remove the restored data from the state if any
+        self.delegate_summaries = {}
 
     def get_current_user_intent(self):
         """Returns the latest user message and image(if provided) that appears after a FinishAction, or the first (the task) if nothing was finished yet."""
