@@ -17,7 +17,7 @@ from opendevin.events.action import (
     IPythonRunCellAction,
     MessageAction,
 )
-from opendevin.events.action.agent import AgentDelegateSummaryAction
+from opendevin.events.action.agent import AgentDelegateSummaryAction, AgentSummarizeAction
 from opendevin.events.observation import (
     AgentDelegateObservation,
     CmdOutputObservation,
@@ -138,6 +138,7 @@ class CodeActAgent(Agent):
             or isinstance(action, CmdRunAction)
             or isinstance(action, IPythonRunCellAction)
             or isinstance(action, MessageAction)
+            or isinstance(action, AgentSummarizeAction)
             or isinstance(action, AgentDelegateSummaryAction)
             or (isinstance(action, AgentFinishAction) and action.source == 'agent')
         ):
