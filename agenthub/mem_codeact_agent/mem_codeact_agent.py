@@ -17,7 +17,10 @@ from opendevin.events.action import (
     IPythonRunCellAction,
     MessageAction,
 )
-from opendevin.events.action.agent import AgentDelegateSummaryAction, AgentSummarizeAction
+from opendevin.events.action.agent import (
+    AgentDelegateSummaryAction,
+    AgentSummarizeAction,
+)
 from opendevin.events.observation import (
     AgentDelegateObservation,
     CmdOutputObservation,
@@ -126,7 +129,7 @@ class CodeActAgent(Agent):
         elif isinstance(action, AgentFinishAction) and action.source == 'agent':
             return action.thought
         elif isinstance(action, AgentSummarizeAction):
-            return f'You made actions like {action.summarized_actions} with the result: {action.summary}'
+            return f'You made actions like {action.summarized_actions} with the result: {action.summarized_observations}'
         elif isinstance(action, AgentDelegateSummaryAction):
             relevant_info_str = '\n'.join(info for info in action.relevant_info)
             return f'You delegated to {action.agent} for task: {action.task}. \nThe result was: {action.summary}. \n{relevant_info_str}'
