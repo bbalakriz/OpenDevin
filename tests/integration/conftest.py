@@ -12,7 +12,7 @@ from threading import Thread
 import pytest
 from litellm import completion
 
-from opendevin.llm.llm import message_separator
+from opendevin.llm.llm import LOG_MESSAGE_SEPARATOR
 
 script_dir = os.environ.get('SCRIPT_DIR')
 project_root = os.environ.get('PROJECT_ROOT')
@@ -177,7 +177,7 @@ def mock_completion(*args, test_name, **kwargs):
     for message in messages:
         for m in message['content']:
             if m['type'] == 'text':
-                message_str += message_separator + m['text']
+                message_str += LOG_MESSAGE_SEPARATOR + m['text']
     # this assumes all response_(*).log filenames are in numerical order, starting from one
     cur_id += 1
     if os.environ.get('FORCE_APPLY_PROMPTS') == 'true':

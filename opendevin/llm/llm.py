@@ -4,6 +4,9 @@ import warnings
 from functools import partial
 
 from opendevin.core.config import LLMConfig
+from opendevin.core.message import Message
+from opendevin.core.metrics import Metrics
+from opendevin.memory.condenser import CondenserMixin
 
 with warnings.catch_warnings():
     warnings.simplefilter('ignore')
@@ -26,18 +29,111 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from opendevin.core.exceptions import UserCancelledError
+from opendevin.core.exceptions import (
+    ContextWindowLimitExceededError,
+    TokenLimitExceededError,
+    UserCancelledError,
+)
 from opendevin.core.logger import llm_prompt_logger, llm_response_logger
 from opendevin.core.logger import opendevin_logger as logger
-from opendevin.core.metrics import Metrics
 
-__all__ = ['LLM']
+__all__ = ['LLM', 'BaseLLM']
 
-message_separator = '\n\n----------\n\n'
+LOG_MESSAGE_SEPARATOR = '\n\n----------\n\n'
+MAX_TOKEN_COUNT_PADDING = 512
 
 
-class LLM:
-    """The LLM class represents a Language Model instance.
+class DebugMixin:
+    def __init__(self, metrics: Metrics | None = None):
+        self.cost_metric_supported = True
+        self.metrics = metrics if metrics is not None else Metrics()
+
+    def _log_debug_prompt(self, messages):
+        debug_message = self._build_debug_message(messages)
+        llm_prompt_logger.debug(debug_message)
+        return debug_message
+
+    def _log_debug_response(self, resp, is_streaming=False):
+        if is_streaming:
+            message_back = resp['choices'][0]['delta']['content']
+        else:
+            message_back = resp['choices'][0]['message']['content']
+        llm_response_logger.debug(message_back)
+        self._post_completion(resp)
+
+    def _build_debug_message(self, messages):
+        debug_message = ''
+        for message in messages:
+            content = message['content']
+            if isinstance(content, list):
+                for element in content:
+                    content_str = self._get_content_str(element)
+                    debug_message += LOG_MESSAGE_SEPARATOR + content_str
+            else:
+                content_str = str(content)
+                debug_message += LOG_MESSAGE_SEPARATOR + content_str
+        return debug_message
+
+    def _get_content_str(self, element):
+        if isinstance(element, dict):
+            if 'text' in element:
+                return element['text'].strip()
+            elif 'image_url' in element and 'url' in element['image_url']:
+                return element['image_url']['url']
+        return str(element)
+
+    def _post_completion(self, response):
+        try:
+            cur_cost = self.completion_cost(response)
+        except Exception:
+            cur_cost = 0
+        if self.cost_metric_supported:
+            logger.info(
+                'Cost: %.2f USD | Accumulated Cost: %.2f USD',
+                cur_cost,
+                self.metrics.accumulated_cost,
+            )
+
+    def completion_cost(self, response):
+        """Calculate the cost of a completion response based on the model.  Local models are treated as free.
+        Add the current cost into total cost in metrics.
+
+        Args:
+            response: A response from a model invocation.
+
+        Returns:
+            number: The cost of the response.
+        """
+        if not self.cost_metric_supported:
+            return 0.0
+
+        extra_kwargs = {}
+        if (
+            self.config.input_cost_per_token is not None  # type: ignore
+            and self.config.output_cost_per_token is not None  # type: ignore
+        ):
+            cost_per_token = CostPerToken(
+                input_cost_per_token=self.config.input_cost_per_token,  # type: ignore
+                output_cost_per_token=self.config.output_cost_per_token,  # type: ignore
+            )
+            logger.info(f'Using custom cost per token: {cost_per_token}')
+            extra_kwargs['custom_cost_per_token'] = cost_per_token
+
+        if not self.is_local():  # type: ignore
+            try:
+                cost = litellm_completion_cost(
+                    completion_response=response, **extra_kwargs
+                )
+                self.metrics.add_cost(cost)
+                return cost
+            except Exception:
+                self.cost_metric_supported = False
+                logger.warning('Cost calculation not supported for this model.')
+        return 0.0
+
+
+class BaseLLM(DebugMixin):
+    """The base class for a Language Model instance.
 
     Attributes:
         config: an LLMConfig object specifying the configuration of the LLM.
@@ -50,14 +146,11 @@ class LLM:
     ):
         """Initializes the LLM. If LLMConfig is passed, its values will be the fallback.
 
-        Passing simple parameters always overrides config.
-
         Args:
             config: The LLM configuration
         """
+        super().__init__(metrics=metrics)
         self.config = copy.deepcopy(config)
-        self.metrics = metrics if metrics is not None else Metrics()
-        self.cost_metric_supported = True
 
         # Set up config attributes with default values to prevent AttributeError
         LLMConfig.set_missing_attributes(self.config)
@@ -116,86 +209,8 @@ class LLM:
 
         completion_unwrapped = self._completion
 
-        def attempt_on_error(retry_state):
-            logger.error(
-                f'{retry_state.outcome.exception()}. Attempt #{retry_state.attempt_number} | You can customize these settings in the configuration.',
-                exc_info=False,
-            )
-            return None
-
-        @retry(
-            reraise=True,
-            stop=stop_after_attempt(self.config.num_retries),
-            wait=wait_random_exponential(
-                multiplier=self.config.retry_multiplier,
-                min=self.config.retry_min_wait,
-                max=self.config.retry_max_wait,
-            ),
-            retry=retry_if_exception_type(
-                (
-                    RateLimitError,
-                    APIConnectionError,
-                    ServiceUnavailableError,
-                    InternalServerError,
-                    ContentPolicyViolationError,
-                )
-            ),
-            after=attempt_on_error,
-        )
-        def wrapper(*args, **kwargs):
-            """Wrapper for the litellm completion function. Logs the input and output of the completion function."""
-            # some callers might just send the messages directly
-            if 'messages' in kwargs:
-                messages = kwargs['messages']
-            else:
-                messages = args[1]
-
-            # log the prompt
-            debug_message = ''
-            for message in messages:
-                content = message['content']
-
-                if isinstance(content, list):
-                    for element in content:
-                        if isinstance(element, dict):
-                            if 'text' in element:
-                                content_str = element['text'].strip()
-                            elif (
-                                'image_url' in element and 'url' in element['image_url']
-                            ):
-                                content_str = element['image_url']['url']
-                            else:
-                                content_str = str(element)
-                        else:
-                            content_str = str(element)
-
-                        debug_message += message_separator + content_str
-                else:
-                    content_str = str(content)
-
-                debug_message += message_separator + content_str
-
-            llm_prompt_logger.debug(debug_message)
-
-            # skip if messages is empty (thus debug_message is empty)
-            if debug_message:
-                resp = completion_unwrapped(*args, **kwargs)
-            else:
-                resp = {'choices': [{'message': {'content': ''}}]}
-
-            # log the response
-            message_back = resp['choices'][0]['message']['content']
-            llm_response_logger.debug(message_back)
-
-            # post-process to log costs
-            self._post_completion(resp)
-
-            return resp
-
-        self._completion = wrapper  # type: ignore
-
-        # Async version
-        self._async_completion = partial(
+        # Define async_completion_unwrapped using self._call_acompletion
+        async_completion_unwrapped = partial(
             self._call_acompletion,
             model=self.config.model,
             api_key=self.config.api_key,
@@ -209,8 +224,13 @@ class LLM:
             drop_params=True,
         )
 
-        async_completion_unwrapped = self._async_completion
+        self._completion = self._create_sync_wrapper(completion_unwrapped)
+        self._async_completion = self._create_async_wrapper(async_completion_unwrapped)
+        self._async_streaming_completion = self._create_async_streaming_wrapper(
+            async_completion_unwrapped
+        )
 
+    def _create_sync_wrapper(self, completion_unwrapped):
         @retry(
             reraise=True,
             stop=stop_after_attempt(self.config.num_retries),
@@ -228,7 +248,47 @@ class LLM:
                     ContentPolicyViolationError,
                 )
             ),
-            after=attempt_on_error,
+            after=self._attempt_on_error,
+        )
+        def retry_wrapper(*args, **kwargs):
+            # some callers might just send the messages directly
+            if 'messages' in kwargs:
+                messages = kwargs['messages']
+            else:
+                messages = args[1]
+
+            debug_message = self._log_debug_prompt(messages)
+
+            # skip if messages is empty (thus debug_message is empty)
+            if debug_message:
+                resp = completion_unwrapped(*args, **kwargs)
+                self._log_debug_response(resp)
+            else:
+                resp = {'choices': [{'message': {'content': ''}}]}
+
+            return resp
+
+        return retry_wrapper
+
+    def _create_async_wrapper(self, async_completion_unwrapped):
+        @retry(
+            reraise=True,
+            stop=stop_after_attempt(self.config.num_retries),
+            wait=wait_random_exponential(
+                multiplier=self.config.retry_multiplier,
+                min=self.config.retry_min_wait,
+                max=self.config.retry_max_wait,
+            ),
+            retry=retry_if_exception_type(
+                (
+                    RateLimitError,
+                    APIConnectionError,
+                    ServiceUnavailableError,
+                    InternalServerError,
+                    ContentPolicyViolationError,
+                )
+            ),
+            after=self._attempt_on_error,
         )
         async def async_completion_wrapper(*args, **kwargs):
             """Async wrapper for the litellm acompletion function."""
@@ -238,32 +298,7 @@ class LLM:
             else:
                 messages = args[1]
 
-            # log the prompt
-            debug_message = ''
-            for message in messages:
-                content = message['content']
-
-                if isinstance(content, list):
-                    for element in content:
-                        if isinstance(element, dict):
-                            if 'text' in element:
-                                content_str = element['text']
-                            elif (
-                                'image_url' in element and 'url' in element['image_url']
-                            ):
-                                content_str = element['image_url']['url']
-                            else:
-                                content_str = str(element)
-                        else:
-                            content_str = str(element)
-
-                        debug_message += message_separator + content_str
-                else:
-                    content_str = str(content)
-
-                debug_message += message_separator + content_str
-
-            llm_prompt_logger.debug(debug_message)
+            debug_message = self._log_debug_prompt(messages)
 
             async def check_stopped():
                 while True:
@@ -278,18 +313,12 @@ class LLM:
             stop_check_task = asyncio.create_task(check_stopped())
 
             try:
-                # Directly call and await litellm_acompletion
-                resp = await async_completion_unwrapped(*args, **kwargs)
-
                 # skip if messages is empty (thus debug_message is empty)
                 if debug_message:
-                    message_back = resp['choices'][0]['message']['content']
-                    llm_response_logger.debug(message_back)
+                    resp = await async_completion_unwrapped(*args, **kwargs)
+                    self._log_debug_response(resp)
                 else:
                     resp = {'choices': [{'message': {'content': ''}}]}
-                self._post_completion(resp)
-
-                # We do not support streaming in this method, thus return resp
                 return resp
 
             except UserCancelledError:
@@ -306,7 +335,6 @@ class LLM:
             ) as e:
                 logger.error(f'Completion Error occurred:\n{e}')
                 raise
-
             finally:
                 await asyncio.sleep(0.1)
                 stop_check_task.cancel()
@@ -315,6 +343,9 @@ class LLM:
                 except asyncio.CancelledError:
                     pass
 
+        return async_completion_wrapper
+
+    def _create_async_streaming_wrapper(self, async_completion_unwrapped):
         @retry(
             reraise=True,
             stop=stop_after_attempt(self.config.num_retries),
@@ -332,7 +363,7 @@ class LLM:
                     ContentPolicyViolationError,
                 )
             ),
-            after=attempt_on_error,
+            after=self._attempt_on_error,
         )
         async def async_acompletion_stream_wrapper(*args, **kwargs):
             """Async wrapper for the litellm acompletion with streaming function."""
@@ -342,11 +373,7 @@ class LLM:
             else:
                 messages = args[1]
 
-            # log the prompt
-            debug_message = ''
-            for message in messages:
-                debug_message += message_separator + message['content']
-            llm_prompt_logger.debug(debug_message)
+            self._log_debug_prompt(messages)
 
             try:
                 # Directly call and await litellm_acompletion
@@ -363,11 +390,7 @@ class LLM:
                         raise UserCancelledError(
                             'LLM request cancelled due to CANCELLED state'
                         )
-                    # with streaming, it is "delta", not "message"!
-                    message_back = chunk['choices'][0]['delta']['content']
-                    llm_response_logger.debug(message_back)
-                    self._post_completion(chunk)
-
+                    self._log_debug_response(chunk, is_streaming=True)
                     yield chunk
 
             except UserCancelledError:
@@ -384,13 +407,18 @@ class LLM:
             ) as e:
                 logger.error(f'Completion Error occurred:\n{e}')
                 raise
-
             finally:
                 if kwargs.get('stream', False):
                     await asyncio.sleep(0.1)
 
-        self._async_completion = async_completion_wrapper  # type: ignore
-        self._async_streaming_completion = async_acompletion_stream_wrapper  # type: ignore
+        return async_acompletion_stream_wrapper
+
+    def _attempt_on_error(self, retry_state):
+        logger.error(
+            f'{retry_state.outcome.exception()}. Attempt #{retry_state.attempt_number} | You can customize these settings in the configuration.',
+            exc_info=False,
+        )
+        return None
 
     async def _call_acompletion(self, *args, **kwargs):
         return await litellm.acompletion(*args, **kwargs)
@@ -422,29 +450,31 @@ class LLM:
     def supports_vision(self):
         return litellm.supports_vision(self.config.model)
 
-    def _post_completion(self, response: str) -> None:
-        """Post-process the completion response."""
-        try:
-            cur_cost = self.completion_cost(response)
-        except Exception:
-            cur_cost = 0
-        if self.cost_metric_supported:
-            logger.info(
-                'Cost: %.2f USD | Accumulated Cost: %.2f USD',
-                cur_cost,
-                self.metrics.accumulated_cost,
-            )
+    def is_over_token_limit(self, messages: list[Message]) -> bool:
+        """
+        Estimates the token count of the given events using litellm tokenizer and returns True if over the max_input_tokens value.
 
-    def get_token_count(self, messages):
-        """Get the number of tokens in a list of messages.
-
-        Args:
-            messages (list): A list of messages.
+        Parameters:
+        - messages: List of messages to estimate the token count for.
 
         Returns:
-            int: The number of tokens.
+        - Boolean indicating whether the token count is over the limit.
         """
-        return litellm.token_counter(model=self.config.model, messages=messages)
+        # max_input_tokens will always be set in init to some sensible default
+        # 0 in config.llm disables the check
+        if not self.config.max_input_tokens:
+            return False
+        token_count = (
+            litellm.token_counter(model=self.config.model, messages=messages)
+            + MAX_TOKEN_COUNT_PADDING
+        )
+        return token_count >= self.config.max_input_tokens
+
+    def get_text_messages(self, messages: list[Message]) -> list[dict]:
+        text_messages = []
+        for message in messages:
+            text_messages.append(message.message)
+        return text_messages
 
     def is_local(self):
         """Determines if the system is using a locally running LLM.
@@ -461,43 +491,6 @@ class LLM:
                 return True
         return False
 
-    def completion_cost(self, response):
-        """Calculate the cost of a completion response based on the model.  Local models are treated as free.
-        Add the current cost into total cost in metrics.
-
-        Args:
-            response: A response from a model invocation.
-
-        Returns:
-            number: The cost of the response.
-        """
-        if not self.cost_metric_supported:
-            return 0.0
-
-        extra_kwargs = {}
-        if (
-            self.config.input_cost_per_token is not None
-            and self.config.output_cost_per_token is not None
-        ):
-            cost_per_token = CostPerToken(
-                input_cost_per_token=self.config.input_cost_per_token,
-                output_cost_per_token=self.config.output_cost_per_token,
-            )
-            logger.info(f'Using custom cost per token: {cost_per_token}')
-            extra_kwargs['custom_cost_per_token'] = cost_per_token
-
-        if not self.is_local():
-            try:
-                cost = litellm_completion_cost(
-                    completion_response=response, **extra_kwargs
-                )
-                self.metrics.add_cost(cost)
-                return cost
-            except Exception:
-                self.cost_metric_supported = False
-                logger.warning('Cost calculation not supported for this model.')
-        return 0.0
-
     def __str__(self):
         if self.config.api_version:
             return f'LLM(model={self.config.model}, api_version={self.config.api_version}, base_url={self.config.base_url})'
@@ -510,3 +503,57 @@ class LLM:
 
     def reset(self):
         self.metrics = Metrics()
+
+
+class LLM(BaseLLM, CondenserMixin):
+    """The LLM class represents a Language Model instance.
+
+    Attributes:
+        config: an LLMConfig object specifying the configuration of the LLM.
+    """
+
+    def __init__(self, config: LLMConfig, metrics: Metrics | None = None):
+        """Initializes the LLM. If LLMConfig is passed, its values will be the fallback.
+
+        Args:
+            config: The LLM configuration
+        """
+        super().__init__(config, metrics)
+
+        def wrapper(*args, **kwargs):
+            """Wrapper for the litellm completion function. Logs the input and output of the completion function."""
+            # some callers might just send the messages directly
+            if 'messages' in kwargs:
+                messages = kwargs['messages']
+            else:
+                messages = args[1]
+
+            try:
+                if self.is_over_token_limit(messages):
+                    raise TokenLimitExceededError()
+            except TokenLimitExceededError:
+                # If we got a context alert, try trimming the messages length, then try again
+                if kwargs['condense'] and self.is_over_token_limit(messages):
+                    # A separate call to run a summarizer
+                    summary_action = self.condense(messages=messages)
+                    return summary_action
+                else:
+                    logger.debug('step() failed with an unrecognized exception:')
+                    raise ContextWindowLimitExceededError()
+
+            # get the messages in the form of list(str)
+            text_messages = self.get_text_messages(messages)
+
+            # call the completion function
+            kwargs = {
+                'messages': text_messages,
+                'stop': kwargs['stop'],
+                'temperature': kwargs['temperature'],
+            }
+
+            # Use the debug_wrapper from DebugMixin
+            resp = self.debug_wrapper(self.completion_unwrapped)(**kwargs)
+
+            return resp
+
+        self._completion = wrapper  # type: ignore
