@@ -21,3 +21,41 @@
 ## Long Term Memory
 - Long term memory component stores embeddings for events and prompts in a vector store
 - The agent can query it when it needs detailed information about a past event or to learn new actions
+
+
+```mermaid
+classDiagram
+    class Agent {
+        +ContextWindow
+        +step()
+    }
+    class Memory {
+        +insertIntoContext()
+    }
+    class History {
+        +get_events()
+        +on_event()
+        +get_last_user_message()
+    }
+    class LongTermMemory {
+        +store()
+        +retrieve()
+    }
+    class MemoryCondenser {
+        +summarize()
+    }
+    class AgentSummarizeAction {
+    }
+    class AgentRecallAction {
+    }
+
+    Agent "1" -- "1" Memory : has
+    Memory "1" -- "1" History : includes
+    Memory "1" -- "1" LongTermMemory : includes
+    Memory "1" -- "1" MemoryCondenser : includes
+    Agent "1" -- "*" AgentSummarizeAction : performs
+    Agent "1" -- "*" AgentRecallAction : performs
+
+    note for History "short term memory"
+    note for Memory "Components insert into ContextWindow"
+```​​​​​​​​​​​​​​​​
