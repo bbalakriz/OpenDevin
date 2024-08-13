@@ -5,6 +5,7 @@ from opendevin.events.action.agent import (
     AgentDelegateSummaryAction,
     AgentFinishAction,
     AgentRejectAction,
+    AgentSummarizeAction,
     ChangeAgentStateAction,
 )
 from opendevin.events.action.browse import BrowseInteractiveAction, BrowseURLAction
@@ -32,6 +33,7 @@ actions = (
     ModifyTaskAction,
     ChangeAgentStateAction,
     MessageAction,
+    AgentSummarizeAction,
     AgentDelegateSummaryAction,
 )
 
