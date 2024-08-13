@@ -135,6 +135,9 @@ model = "gpt-4o"
 # Top p for the API
 #top_p = 0.5
 
+# Fraction of context window to condense memory, if memory_summarization_enabled is true
+#message_summary_trunc_tokens_frac = 0.75
+
 [llm.gpt3]
 # API key to use
 api_key = "your-api-key"
@@ -149,8 +152,14 @@ model = "gpt-3.5"
 # agent.CodeActAgent
 ##############################################################################
 [agent]
-# Memory enabled
+# Long-term memory enabled
 #memory_enabled = false
+
+# Short-term memory enabled. If true, older messages are condensed into a single message.
+#history_summarization_enabled = false
+
+# History cut-off. Only used if history_summarization_enabled is false, otherwise it condenses history instead of cutting it off.
+# history_cutoff = 50
 
 # Memory maximum threads
 #memory_max_threads = 2

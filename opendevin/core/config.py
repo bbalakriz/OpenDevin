@@ -52,6 +52,7 @@ class LLMConfig:
         output_cost_per_token: The cost per output token. This will available in logs for the user to check.
         ollama_base_url: The base URL for the OLLAMA API.
         drop_params: Drop any unmapped (unsupported) params without causing an exception.
+        memory_summarization_fraction: The fraction of the memory context window to condense. Only used if history_summarization_enabled is true.
     """
 
     model: str = 'gpt-4o'
@@ -73,12 +74,13 @@ class LLMConfig:
     temperature: float = 0
     top_p: float = 0.5
     custom_llm_provider: str | None = None
-    max_input_tokens: int | None = None
+    max_input_tokens: int | None = None  # if history_summarization_enabled is true, this is the number of tokens to truncate the history context window to
     max_output_tokens: int | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
     ollama_base_url: str | None = None
     drop_params: bool | None = None
+    memory_summarization_fraction: float = 0.75
 
     def defaults_to_dict(self) -> dict:
         """Serialize fields to a dict for the frontend, including type hints, defaults, and whether it's optional."""
@@ -124,11 +126,15 @@ class AgentConfig:
 
     Attributes:
         memory_enabled: Whether long-term memory (embeddings) is enabled.
+        history_summarization_enabled: Whether history summarization is enabled.
+        history_cutoff: The cutoff for history summarization. Only used if history_summarization_enabled is false.
         memory_max_threads: The maximum number of threads indexing at the same time for embeddings.
         llm_config: The name of the llm config to use. If specified, this will override global llm config.
     """
 
     memory_enabled: bool = False
+    history_summarization_enabled: bool = True
+    history_cutoff: int = 50  # only used if history_summarization_enabled is false
     memory_max_threads: int = 2
     llm_config: str | None = None
 
