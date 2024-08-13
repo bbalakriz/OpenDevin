@@ -185,11 +185,9 @@ class CondenserMixin:
             input = [
                 Message({'role': 'assistant', 'content': curr_summary_message})
             ] + message_sequence_to_summarize[cutoff:]
-            summary_input = self._format_summary_history(self.get_text_messages(input))  # type: ignore
+            summary_prompt = self.get_text_messages(input)  # type: ignore
 
-        message_sequence = []
-        message_sequence.append(Message({'role': 'system', 'content': summary_prompt}))
-        message_sequence.append(Message({'role': 'user', 'content': summary_input}))
+        message_sequence = [Message({'role': 'user', 'content': summary_prompt})]
 
         response = self.completion(  # type: ignore
             messages=message_sequence,

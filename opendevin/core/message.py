@@ -39,8 +39,14 @@ class ImageContent(Content):
 
 
 class Message(BaseModel):
+    """
+    A serializable representation of an action or observation.
+    """
+
     role: Literal['user', 'system', 'assistant']
     content: list[TextContent | ImageContent] = Field(default=list)
+    condensable: bool = Field(default=True)
+    event_id: int = Field(default=-1)
 
     @property
     def contains_image(self) -> bool:
