@@ -202,7 +202,6 @@ class AgentController:
             elif isinstance(event, CmdOutputObservation):
                 logger.info(event, extra={'msg_type': 'OBSERVATION'})
             elif isinstance(event, AgentDelegateObservation):
-                self.state.history.on_event(event)
                 logger.info(event, extra={'msg_type': 'OBSERVATION'})
             elif isinstance(event, ErrorObservation):
                 logger.info(event, extra={'msg_type': 'OBSERVATION'})
@@ -451,6 +450,7 @@ class AgentController:
             self.state = state
 
         # initialize short term memory
+        # FIXME
         history = (
             ShortTermHistory()
             if state is None or not hasattr(state, 'history') or state.history is None

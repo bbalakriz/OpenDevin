@@ -17,7 +17,7 @@ from opendevin.events.observation.delegate import AgentDelegateObservation
 from opendevin.events.observation.empty import NullObservation
 from opendevin.events.observation.observation import Observation
 from opendevin.events.serialization.event import event_to_dict
-from opendevin.events.stream import EventStream
+from opendevin.events.stream import EventStream, EventStreamSubscriber
 from opendevin.llm.llm import LLM
 
 
@@ -49,6 +49,7 @@ class ShortTermHistory(list[Event]):
 
     def set_event_stream(self, event_stream: EventStream):
         self._event_stream = event_stream
+        self._event_stream.subscribe(EventStreamSubscriber.MEMORY, self.on_event)
 
     def init_memory_condenser(self, llm: LLM):
         from opendevin.memory.condenser import MemoryCondenser
