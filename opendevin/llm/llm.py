@@ -520,19 +520,40 @@ class LLM(BaseLLM, CondenserMixin):
         """
         super().__init__(config, metrics)
 
-        def wrapper(*args, **kwargs):
-            """Wrapper for the litellm completion function. Logs the input and output of the completion function."""
+    def _create_sync_wrapper(self, completion_unwrapped):
+        @retry(
+            reraise=True,
+            stop=stop_after_attempt(self.config.num_retries),
+            wait=wait_random_exponential(
+                multiplier=self.config.retry_multiplier,
+                min=self.config.retry_min_wait,
+                max=self.config.retry_max_wait,
+            ),
+            retry=retry_if_exception_type(
+                (
+                    RateLimitError,
+                    APIConnectionError,
+                    ServiceUnavailableError,
+                    InternalServerError,
+                    ContentPolicyViolationError,
+                )
+            ),
+            after=self._attempt_on_error,
+        )
+        def retry_wrapper(*args, **kwargs):
             # some callers might just send the messages directly
             if 'messages' in kwargs:
                 messages = kwargs['messages']
             else:
                 messages = args[1]
 
+            debug_message = self._log_debug_prompt(messages)
+
             try:
                 if self.is_over_token_limit(messages):
                     raise TokenLimitExceededError()
             except TokenLimitExceededError:
-                # If we got a context alert, try trimming the messages length, then try again
+                # If we got a token limit exceeded error, try condensing the messages, then try again
                 if kwargs['condense'] and self.is_over_token_limit(messages):
                     # A separate call to run a summarizer
                     summary_action = self.condense(messages=messages)
@@ -541,19 +562,18 @@ class LLM(BaseLLM, CondenserMixin):
                     logger.debug('step() failed with an unrecognized exception:')
                     raise ContextWindowLimitExceededError()
 
+            # if we get here, the token limit has not been exceeded
             # get the messages in the form of list(str)
-            text_messages = self.get_text_messages(messages)
+            # text_messages = self.get_text_messages(messages)
 
             # call the completion function
-            kwargs = {
-                'messages': text_messages,
-                'stop': kwargs['stop'],
-                'temperature': kwargs['temperature'],
-            }
-
-            # Use the debug_wrapper from DebugMixin
-            resp = self.debug_wrapper(self.completion_unwrapped)(**kwargs)
+            # skip if messages is empty (thus debug_message is empty)
+            if debug_message:
+                resp = completion_unwrapped(*args, **kwargs)
+                self._log_debug_response(resp)
+            else:
+                resp = {'choices': [{'message': {'content': ''}}]}
 
             return resp
 
-        self._completion = wrapper  # type: ignore
+        return retry_wrapper

@@ -5,6 +5,7 @@ from opendevin.events.action.action import Action
 from opendevin.events.action.agent import (
     AgentDelegateAction,
     AgentDelegateSummaryAction,
+    AgentSummarizeAction,
     ChangeAgentStateAction,
 )
 from opendevin.events.action.empty import NullAction
@@ -29,6 +30,7 @@ class ShortTermHistory(list[Event]):
     start_id: int
     end_id: int
     _event_stream: EventStream
+    summaries: dict[tuple[int, int], AgentSummarizeAction]
     delegate_summaries: dict[tuple[int, int], AgentDelegateSummaryAction]
 
     filter_out: ClassVar[tuple[type[Event], ...]] = (
@@ -42,6 +44,7 @@ class ShortTermHistory(list[Event]):
         super().__init__()
         self.start_id = -1
         self.end_id = -1
+        self.summaries = {}
         self.delegate_summaries = {}
 
     def set_event_stream(self, event_stream: EventStream):
