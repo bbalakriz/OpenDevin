@@ -548,7 +548,7 @@ class LLM(BaseLLM, CondenserMixin):
                     raise TokenLimitExceededError()
             except TokenLimitExceededError:
                 # If we got a token limit exceeded error, try condensing the messages, then try again
-                if kwargs['condense'] and self.is_over_token_limit(messages):
+                if self.is_over_token_limit(messages):
                     # A separate call to run a summarizer
                     summary_action = self.condense(messages=messages)
                     return summary_action

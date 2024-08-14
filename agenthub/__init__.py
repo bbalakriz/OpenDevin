@@ -14,12 +14,14 @@ from . import (  # noqa: E402
     codeact_swe_agent,
     delegator_agent,
     dummy_agent,
+    mem_codeact_agent,
     planner_agent,
 )
 
 __all__ = [
     'codeact_agent',
     'codeact_swe_agent',
+    'mem_codeact_agent',
     'planner_agent',
     'delegator_agent',
     'dummy_agent',

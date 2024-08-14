@@ -9,7 +9,6 @@ from opendevin.events.action.agent import (
 )
 from opendevin.events.event import Event
 from opendevin.events.serialization.event import event_to_memory
-from opendevin.llm.llm import LLM
 from opendevin.memory.prompts import (
     get_delegate_summarize_prompt,
     get_summarize_prompt,
@@ -22,12 +21,7 @@ MESSAGE_SUMMARY_WARNING_FRAC = 0.75
 
 
 class MemoryCondenser:
-    llm: LLM
-
-    def __init__(self, llm: LLM):
-        self.llm = llm
-
-    def condense(self, summarize_prompt: str, llm: LLM):
+    def condense(self, summarize_prompt: str, llm):
         """Attempts to condense the memory by using the llm
 
         Parameters:
@@ -68,7 +62,7 @@ class MemoryCondenser:
             )
 
             messages = [{'role': 'user', 'content': prompt}]
-            response = self.llm.completion(messages=messages)
+            response = self.completion(messages=messages)  # type: ignore
 
             action_response: str = response['choices'][0]['message']['content']
             action = parse_delegate_summary_response(action_response)

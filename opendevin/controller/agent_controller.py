@@ -2,6 +2,9 @@ import asyncio
 import traceback
 from typing import Optional, Type
 
+# ruff: noqa: I001
+from opendevin.memory.history import ShortTermHistory
+
 from opendevin.controller.agent import Agent
 from opendevin.controller.state.state import State, TrafficControlState
 from opendevin.controller.stuck import StuckDetector
@@ -37,7 +40,6 @@ from opendevin.events.observation import (
     Observation,
 )
 from opendevin.llm.llm import LLM
-from opendevin.memory.history import ShortTermHistory
 
 # note: RESUME is only available on web GUI
 TRAFFIC_CONTROL_REMINDER = (
@@ -456,10 +458,9 @@ class AgentController:
             if state is None or not hasattr(state, 'history') or state.history is None
             else state.history
         )
-        history.init_memory_condenser(self.agent.llm)
-        history.set_event_stream(self.event_stream)
         # when restored from a previous session, the State object will have history, start_id, and end_id
         # connect it to the event stream
+        self.state.history = history
         self.state.history.set_event_stream(self.event_stream)
 
         # if start_id was not set in State, we're starting fresh, at the top of the stream

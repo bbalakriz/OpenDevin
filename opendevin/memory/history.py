@@ -54,7 +54,7 @@ class ShortTermHistory(list[Event]):
     def init_memory_condenser(self, llm: LLM):
         from opendevin.memory.condenser import MemoryCondenser
 
-        self.memory_condenser = MemoryCondenser(llm)
+        self.memory_condenser = MemoryCondenser()
 
     def get_events_as_list(self) -> list[Event]:
         """Return the history as a list of Event objects."""
@@ -196,7 +196,7 @@ class ShortTermHistory(list[Event]):
                 return True
         return False
 
-    def on_event(self, event: Event):
+    async def on_event(self, event: Event):
         if not isinstance(event, AgentDelegateObservation):
             return
 
