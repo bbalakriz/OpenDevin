@@ -1,5 +1,5 @@
-from agenthub.codeact_agent.action_parser import CodeActResponseParser
-from agenthub.codeact_agent.prompt import (
+from agenthub.mem_codeact_agent.action_parser import MemCodeActResponseParser
+from agenthub.mem_codeact_agent.prompt import (
     COMMAND_DOCS,
     EXAMPLES,
     GITHUB_MESSAGE,
@@ -51,7 +51,7 @@ def get_in_context_example() -> str:
     return EXAMPLES
 
 
-class CodeActAgent(Agent):
+class MemCodeActAgent(Agent):
     VERSION = '1.8'
     """
     The Code Act Agent is a minimalist agent.
@@ -101,13 +101,13 @@ class CodeActAgent(Agent):
     system_message: str = get_system_message()
     in_context_example: str = f"Here is an example of how you can interact with the environment for task solving:\n{get_in_context_example()}\n\nNOW, LET'S START!"
 
-    action_parser = CodeActResponseParser()
+    action_parser = MemCodeActResponseParser()
 
     def __init__(
         self,
         llm: LLM,
     ) -> None:
-        """Initializes a new instance of the CodeActAgent class.
+        """Initializes a new instance of the MemCodeActAgent class.
 
         Parameters:
         - llm (LLM): The llm to be used by this agent

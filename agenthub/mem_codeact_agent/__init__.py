@@ -1,5 +1,5 @@
 from opendevin.controller.agent import Agent
 
-from .codeact_agent import CodeActAgent
+from .mem_codeact_agent import MemCodeActAgent
 
-Agent.register('CodeActAgent', CodeActAgent)
+Agent.register('MemCodeActAgent', MemCodeActAgent)
