@@ -470,12 +470,6 @@ class BaseLLM(DebugMixin):
         )
         return token_count >= self.config.max_input_tokens
 
-    def get_text_messages(self, messages: list[Message]) -> list[dict]:
-        text_messages = []
-        for message in messages:
-            text_messages.append(message.message)
-        return text_messages
-
     def is_local(self):
         """Determines if the system is using a locally running LLM.
 

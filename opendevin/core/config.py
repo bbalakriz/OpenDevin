@@ -74,7 +74,9 @@ class LLMConfig:
     temperature: float = 0
     top_p: float = 0.5
     custom_llm_provider: str | None = None
-    max_input_tokens: int | None = None  # if history_summarization_enabled is true, this is the number of tokens to truncate the history context window to
+    max_input_tokens: int | None = (
+        None  # if history_summarization_enabled is true, this is the number of tokens to truncate the history context window to
+    )
     max_output_tokens: int | None = None
     input_cost_per_token: float | None = None
     output_cost_per_token: float | None = None
@@ -127,7 +129,7 @@ class AgentConfig:
     Attributes:
         memory_enabled: Whether long-term memory (embeddings) is enabled.
         history_summarization_enabled: Whether history summarization is enabled.
-        history_cutoff: The cutoff for history summarization. Only used if history_summarization_enabled is false.
+        history_cutoff: The cutoff for the history sent in the context window. Only used if history_summarization_enabled is false.
         memory_max_threads: The maximum number of threads indexing at the same time for embeddings.
         llm_config: The name of the llm config to use. If specified, this will override global llm config.
     """
